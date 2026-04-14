@@ -1,0 +1,117 @@
+# ==========================================================================
+# Paediatric Simulation AI Feedback Pipeline — Configuration Template
+# ==========================================================================
+# Copy this file to pipeline_config.yaml and fill in your local paths.
+# Part of the freeze manifest. Any change requires a version bump.
+# ==========================================================================
+
+## Global pipeline settings
+pipeline:
+  seed: 42                   ## Global random seed for reproducibility
+
+## Output and resource paths
+paths:
+  output_dir: "data/reports"                       ## Where session reports are written
+## Note: scenario definitions (instruments per scenario) and session → scenario
+## mappings live in session_overview.json at the project root — edit that file
+## to register new sessions or scenarios.
+
+# --------------------------------------------------------------------------
+# Stage 01: Data Ingestion
+# --------------------------------------------------------------------------
+## Validates video files, extracts audio, and optionally splits composite
+## 2x2 quadrant videos into individual camera views.
+ingest:
+  accepted_video_formats: [".mp4", ".avi", ".mkv", ".mov"]
+  composite_video:
+    enabled: true            ## Set to false if input is a single-camera video
+    ## Which quadrant to send to MediaPipe for non-verbal analysis.
+    ## Can be overridden per-session in metadata.json → "video_analysis_quadrant".
+    video_analysis_quadrant: "bottom_right"
+    ## Labels for each quadrant (for documentation only)
+    quadrants:
+      top_left: "overhead_camera"
+      top_right: "patient_monitor"
+      bottom_left: "side_camera"
+      bottom_right: "parent_eyetracking"
+
+# --------------------------------------------------------------------------
+# Stage 02: ASR & Speaker Diarization
+# --------------------------------------------------------------------------
+## Uses whisper-diarization (MahmoudAshraf97) for transcription + diarization.
+## Requires a local clone of the repo and a conda environment named
+## "whisper-diarization".
+asr:
+  model_name: large-v3       ## Whisper model size
+  language: de               ## Language code for transcription
+  device: cuda               ## "cuda" or "cpu"
+  compute_type: "float16"    ## Use "int8" on CPU-only machines
+  beam_size: 7
+  suppress_numerals: true    ## Spell out numbers instead of digits
+  diarization:
+    enabled: true
+    repo_path: /path/to/whisper-diarization  ## ← Set your local clone path
+    batch_size: 16           ## Batch size for whisper-diarization inference
+    temperature: 0           ## Decoding temperature (0 = greedy)
+    no_stem: true            ## Skip Demucs source separation (faster, lower quality)
+
+# --------------------------------------------------------------------------
+# Stage 03: Feature Extraction
+# --------------------------------------------------------------------------
+## Extracts turn-taking, pause, and interruption metrics from the diarized
+## transcript.
+features:
+  verbal:
+    pause_threshold_s: 2.0   ## Minimum gap (seconds) to count as a meaningful pause
+    compute_interruptions: true
+
+# --------------------------------------------------------------------------
+# Stage 04: Video Analysis (MediaPipe)
+# --------------------------------------------------------------------------
+## Tracks face, pose, and hands using MediaPipe for LUCAS non-verbal items
+## (D — eye contact, positioning, posture, expressions, gestures).
+video_analysis:
+  enabled: true
+  sample_fps: 10             ## Frames per second to analyse (lower = faster)
+  preferred_quadrant: "bottom_right"  ## Fallback if inventory.json has no quadrant set
+  calibration_seconds: 120   ## Seconds used to compute person-relative baselines
+  generate_annotated_video: true  ## Write annotated_video.mp4 to output dir
+  annotated_codec: "mp4v"
+  annotated_draw_landmarks: true
+  ## MediaPipe detection thresholds
+  detection_confidence: 0.4
+  tracking_confidence: 0.4
+  dnn_confidence: 0.3
+  ## Face crop parameters for two-stage detection
+  face_crop_size: 320
+  face_pad: 0.4
+  upscale_factor: 1.0
+  dnn_interval: 1            ## Run OpenCV DNN face detector every N frames
+  num_workers: 40
+
+# --------------------------------------------------------------------------
+# Stage 05: LLM Analysis
+# --------------------------------------------------------------------------
+## Runs all instruments defined in the scenario catalog through the LLM.
+## Each instrument uses multi-pass scoring with Jinja2 templates.
+llm:
+  backend: "llama_cpp"       ## "llama_cpp" or "vllm"
+  model_path: "/path/to/your/model.gguf"  ## ← Set your local model path
+  context_length: 32768      ## Context window size in tokens
+  temperature: 0.0           ## 0.0 = deterministic / greedy decoding
+  top_p: 1.0
+  seed: 42
+  max_tokens: 10000          ## Max tokens per LLM response
+  repeat_penalty: 1.05
+  n_gpu_layers: -1           ## -1 = offload all layers to GPU
+
+# --------------------------------------------------------------------------
+# Stage 07: Report Generation
+# --------------------------------------------------------------------------
+## Renders analysis results into structured feedback reports.
+report:
+  additional_formats: ["pdf", "html"]  ## Generate PDF and/or HTML alongside JSON
+  template: "templates/report_template.html"
+  label_prefix: "REPORT"    ## Blinded labels: REPORT_session001, REPORT_session002, ...
+  include_timestamps: true   ## Include transcript timestamps in report
+  include_spikes: true       ## Include SPIKES annotation section in report

@@ -1,0 +1,67 @@
+Du bist ein Experte für medizinische Ausbildung und bewertest die Gesprächsstruktur einer pädiatrischen Simulationsübung.
+
+## ⚠ GESPRÄCHSKONTEXT
+
+- SPEAKER_00 = Kliniker (zu bewerten)
+- SPEAKER_01 = Bezugsperson / Angehöriger (nicht zu bewerten)
+
+---
+
+## Bewertungsmaßstab
+
+{{ scoring_preamble }}
+
+---
+
+## PASS 3 — I-Phase (Invitation)
+
+⚠ **Phase-Fokus:** {{ phase_focus }}
+
+{% for item in items %}
+---
+
+### Item {{ item.id }}: {{ item.name }}
+
+{{ item.description }}
+
+{% for level, text in item.scoring_guidance.items() %}
+- **{{ level }}**: {{ text }}
+{% endfor %}
+
+{% for note in item.get('evaluation_notes', []) %}
+*Hinweis {{ loop.index }}:* {{ note }}
+{% endfor %}
+{% endfor %}
+
+---
+
+## Diarisiertes Transkript
+
+{{ transcript_text }}
+
+---
+
+## Anweisungen
+
+Prüfe ob der Kliniker den Informationswunsch der Bezugsperson erfragt hat — auch indirekte Formen wie 'Ist es in Ordnung wenn ich Ihnen die Ergebnisse jetzt schildere?' oder 'Möchten Sie dass ich Ihnen die Hintergründe erläutere?' zählen. Die Einladung muss nicht zwingend VOR der Diagnose erfolgen — auch während des Gesprächs gestellte Fragen zum Informationsbedürfnis zählen.
+
+⚠ **QUELLENREGEL:** Bewerte AUSSCHLIESSLICH auf Basis des bereitgestellten Transkripts. Verwende KEIN Vorwissen um zu erschließen was gesagt wurde — wenn es nicht im Transkript steht, wurde es NICHT gesagt. Bei mehrdeutigem Transkript: wähle den Score der am besten durch Transkriptbelege gestützt wird und vermerke die Unklarheit.
+
+⚠ **Transkriptbindung:** Nur tatsächliche Zeitstempel aus dem Transkript verwenden. Erfundene Zeitstempel sind schlimmer als kein Zeitstempel.
+
+Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt:
+
+{
+  "items": [
+    {
+      "id": "DM_I_9",
+      "item_no": 9,
+      "phase": "I",
+      "name": "Informationswunsch besprechen",
+      "type": "standard",
+      "rating": <0, 1 oder 2>,
+      "justification": "<Begründung>",
+      "evidence": ["<[MM:SS] 'Zitat'>"]
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "scenarios": {
+    "Diabetes": {
+      "instruments": ["LUCAS", "SPIKES", "Diabetes_CC"],
+      "display_name": "Diagnoseübermittlung Diabetes Mellitus Typ 1",
+      "scenario_context": {
+        "setting": "Diagnoseübermittlung Diabetes Mellitus Typ 1 bei einem pädiatrischen Patienten (Erstmanifestation)"
+      }
+    },
+    "LP_Aufklaerung": {
+      "instruments": ["LUCAS", "GSLP", "LP_Aufklaerung"],
+      "display_name": "LP-Aufklärung bei V.a. Meningitis",
+      "scenario_context": {
+        "setting": "Einwilligungsgespräch für eine Lumbalpunktion bei Verdacht auf Meningitis"
+      }
+    }
+  },
+  "sessions": {
+    "session_0000": {
+      "scenario": "LP_Aufklaerung",
+      "video_analysis_quadrant": "bottom_right",
+      "conversation_start_s": 0.0,
+      "conversation_end_s": 1000
+    }
+   
+  }
+}

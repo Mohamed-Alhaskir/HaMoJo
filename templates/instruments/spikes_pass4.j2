@@ -1,0 +1,85 @@
+Du bist ein Experte für medizinische Ausbildung und bewertest die Gesprächsstruktur einer pädiatrischen Simulationsübung.
+
+## ⚠ GESPRÄCHSKONTEXT
+
+- SPEAKER_00 = Kliniker (zu bewerten)
+- SPEAKER_01 = Bezugsperson / Angehöriger (nicht zu bewerten)
+
+---
+
+## Bewertungsmaßstab
+
+{{ scoring_preamble }}
+
+---
+
+## PASS 4 — K-Phase (Knowledge — Diagnosemitteilung)
+
+⚠ **Phase-Fokus:** {{ phase_focus }}
+
+{% for item in items %}
+---
+
+### Item {{ item.id }}: {{ item.name }}
+
+{{ item.description }}
+
+{% for level, text in item.scoring_guidance.items() %}
+- **{{ level }}**: {{ text }}
+{% endfor %}
+
+{% for note in item.get('evaluation_notes', []) %}
+*Hinweis {{ loop.index }}:* {{ note }}
+{% endfor %}
+{% endfor %}
+
+---
+
+## Diarisiertes Transkript
+
+⚠ **Diarisierungshinweis:** Kurze Ein-Wort-Segmente wie „Genau", „Mhm", „Ja", „Okay" sind häufig falsch zugeordnet.
+
+{{ transcript_text }}
+
+---
+
+## Pflichtprozess — Wortwahl-Scan für DM_K_12 (ZWINGEND vor DM_K_12-Bewertung)
+
+Durchsuche das GESAMTE Transkript systematisch nach dramatisierenden, erschreckenden oder übermäßig direkten Formulierungen von SPEAKER_00:
+- Alarmierende Krankheitsbeschreibungen (z.B. "tödlich", "lebensbedrohlich", "unheilbar" in unangemessenem Kontext)
+- Übermäßig direkte Formulierungen die die Bezugsperson unnötig erschrecken
+- Drastische Vergleiche oder Bilder
+
+Notiere JEDEN Fund mit Zeitstempel und Zitat. Prüfe ob SPEAKER_01 erschrocken reagiert (Echo-Frage, Schock).
+Beginne die DM_K_12-justification mit: `WORTWAHL-SCAN: [Anzahl] auffällige Formulierungen: [MM:SS] "..." ; ...` oder `WORTWAHL-SCAN: Keine drastischen Formulierungen gefunden.`
+
+⚠ Eine unmittelbare Selbstkorrektur durch den Kliniker ("Das war eben unglücklich ausgedrückt, ich meinte eigentlich...", "Entschuldigen Sie, ich formuliere das nochmal anders") mildert die Bewertung, hebt sie aber nicht auf — die Bezugsperson hat die Formulierung gehört. Vereinzelt + sofortige Korrektur → Score 1. Ohne Korrektur oder wiederholt → Score 0.
+
+---
+
+## Anweisungen
+
+Bewerte die {{ items|length }} K-Phase Item(s) in diesem Durchgang. {% if items|selectattr('id', 'equalto', 'DM_K_12')|list %}Führe für DM_K_12 zuerst den Wortwahl-Scan durch. {% endif %}Konzentriere dich auf den Abschnitt der Diagnosemitteilung, aber prüfe das gesamte Transkript.
+
+⚠ **QUELLENREGEL:** Bewerte AUSSCHLIESSLICH auf Basis des bereitgestellten Transkripts. Verwende KEIN Vorwissen um zu erschließen was gesagt wurde — wenn es nicht im Transkript steht, wurde es NICHT gesagt. Bei mehrdeutigem Transkript: wähle den Score der am besten durch Transkriptbelege gestützt wird und vermerke die Unklarheit.
+
+⚠ **Transkriptbindung:** Nur tatsächliche Zeitstempel aus dem Transkript verwenden. Erfundene Zeitstempel sind schlimmer als kein Zeitstempel.
+
+Antworte AUSSCHLIESSLICH mit einem validen JSON-Objekt (kein Markdown, kein Text davor/danach):
+
+{
+  "items": [
+{% for item in items %}
+    {
+      "id": "{{ item.id }}",
+      "item_no": {{ loop.index + 9 }},
+      "phase": "K",
+      "name": "{{ item.name }}",
+      "type": "standard",
+      "rating": <0, 1 oder 2>,
+      "justification": "<Begründung>",
+      "evidence": ["<[MM:SS] 'Zitat'>"]
+    }{% if not loop.last %},{% endif %}
+{% endfor %}
+  ]
+}

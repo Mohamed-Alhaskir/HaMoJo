@@ -1,0 +1,519 @@
+#!/usr/bin/env python3
+"""
+Paediatric Simulation AI Feedback Pipeline
+===========================================
+Frozen, version-locked pipeline for generating standardized feedback reports
+from audiovisual recordings of paediatric simulation scenarios.
+
+Stage order
+-----------
+  1. ingest         — validate video, extract audio, split quadrants
+  2. asr            — transcription + speaker diarization
+  3. features       — verbal interaction metrics + phase segmentation
+  4. video_analysis — non-verbal behaviour (MediaPipe, LUCAS-aligned)
+  5. analysis       — LLM assessment (assembles context from 2+3+4)
+  6. report         — render standardized feedback report
+
+Note: features (3) must run before video_analysis (4) because video
+analysis uses ctx["artifacts"]["features"]["phases"] for per-phase NVB
+summaries.
+
+Usage
+-----
+    python pipeline.py --config config/pipeline_config.yaml --input data/raw/session_001/
+    python pipeline.py --config config/pipeline_config.yaml --input data/raw/ --batch
+    python pipeline.py --config config/pipeline_config.yaml --input data/raw/ --batch --force
+    python pipeline.py --config config/pipeline_config.yaml --freeze-manifest
+"""
+
+import argparse
+import json
+import logging
+import os
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+import yaml
+
+import numpy as np
+
+# NumPy 2 compatibility shims for legacy libraries that reference removed aliases
+if not hasattr(np, "NaN"):
+    np.NaN = np.nan
+if not hasattr(np, "NAN"):
+    np.NAN = np.nan
+if not hasattr(np, "Inf"):
+    np.Inf = np.inf
+if not hasattr(np, "PINF"):
+    np.PINF = np.inf
+if not hasattr(np, "NINF"):
+    np.NINF = -np.inf
+
+from stages.s1_ingest import DataIngestionStage
+from stages.s2_asr import ASRStage
+from stages.s3_features import FeatureExtractionStage
+from stages.s4_video_analysis import VideoAnalysisStage
+from stages.s5_analysis import LLMAnalysisStage
+from stages.s6_translate import TranslationStage
+from stages.s7_report import ReportGenerationStage
+from utils.freeze import FreezeManifest
+from utils.logging_setup import setup_logging
+from utils.json_utils import JSONEncoder, sanitize_for_json
+
+# ---------------------------------------------------------------------------
+# Pipeline version — increment on ANY change to code, prompts, or models
+# ---------------------------------------------------------------------------
+PIPELINE_VERSION = "1.0.0"
+
+# ---------------------------------------------------------------------------
+# Mapping from stage name → the output subdirectory that stage writes to.
+# This is the single source of truth used by both the stage itself and the
+# checkpoint logic, so they can never disagree.
+# ---------------------------------------------------------------------------
+STAGE_OUTPUT_DIRS: dict[str, str] = {
+    "ingest":         "01_ingest",
+    "asr":            "02_asr",
+    "features":       "03_features",
+    "video_analysis": "04_video_analysis",
+    "analysis":       "05_analysis",
+    #"translate":      "06_translate",
+    "report":         "07_report",
+}
+
+# Stage execution order. features must precede video_analysis because
+# video_analysis reads ctx["artifacts"]["features"]["phases"].
+STAGE_ORDER = [
+    "ingest",
+    "asr",
+    "features",
+    "video_analysis",
+    "analysis",
+    #"translate",
+    "report",
+]
+
+_ARTIFACT_KEYS_TO_SLIM = {
+    "ingest":         ["video_frames"],
+    "asr":            ["transcript"],
+    "features":       ["features"],
+    "video_analysis": ["video_features"],
+    "analysis":       ["assembled_context"],
+}
+
+
+class Pipeline:
+    """End-to-end pipeline orchestrator."""
+
+    def __init__(self, config_path: str):
+        self.config = self._load_config(config_path)
+        self.config_path = Path(config_path)
+        self.logger = logging.getLogger("pipeline")
+
+        self.manifest = FreezeManifest(
+            pipeline_version=PIPELINE_VERSION,
+            config=self.config,
+        )
+
+        # Verify freeze manifest if one exists
+        self.frozen_manifest = None
+        manifest_path = Path("freeze_manifest.json")
+        if manifest_path.exists():
+            frozen = FreezeManifest.load_and_verify(
+                str(manifest_path), self.config, PIPELINE_VERSION
+            )
+            if not frozen:
+                self.logger.error(
+                    "Pipeline state does not match freeze manifest. "
+                    "Bump the version and re-freeze, or remove "
+                    "freeze_manifest.json to run without verification."
+                )
+                raise SystemExit(1)
+            self.frozen_manifest = frozen
+
+        self.stages = {
+            "ingest":         DataIngestionStage(self.config),
+            "asr":            ASRStage(self.config),
+            "features":       FeatureExtractionStage(self.config),
+            "video_analysis": VideoAnalysisStage(self.config),
+            "analysis":       LLMAnalysisStage(self.config),
+            "translate":      TranslationStage(self.config),
+            "report":         ReportGenerationStage(self.config),
+        }
+
+    # ------------------------------------------------------------------
+    # Config
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _load_config(path: str) -> dict:
+        with open(path, "r") as f:
+            return yaml.safe_load(f)
+
+    # ------------------------------------------------------------------
+    # Checkpoint helpers
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _checkpoint_path(output_base: Path, stage_name: str) -> Path:
+        """Return the checkpoint file path for a given stage."""
+        subdir = STAGE_OUTPUT_DIRS[stage_name]
+        return output_base / subdir / ".stage_checkpoint.json"
+
+    def _save_checkpoint(
+        self, output_base: Path, stage_name: str, ctx: dict
+    ) -> None:
+        """Persist stage artifacts to a checkpoint file."""
+        checkpoint_path = self._checkpoint_path(output_base, stage_name)
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(checkpoint_path, "w", encoding="utf-8") as f:
+                json.dump(
+                    {
+                        "stage": stage_name,
+                        "saved_at": datetime.now(timezone.utc).isoformat(),
+                        "artifacts": sanitize_for_json(ctx["artifacts"]),
+                        "timestamp": ctx["timestamps"].get(stage_name, {}),
+                    },
+                    f,
+                    indent=2,
+                    cls=JSONEncoder,
+                )
+        except Exception as e:
+            self.logger.warning(
+                f"Could not save checkpoint for '{stage_name}': {e}. "
+                "Stage will re-run on next invocation."
+            )
+
+    def _load_checkpoint(
+        self, output_base: Path, stage_name: str, ctx: dict
+    ) -> bool:
+        """
+        Attempt to restore a stage from its checkpoint.
+
+        Returns True if the checkpoint was loaded successfully, False otherwise.
+        """
+        checkpoint_path = self._checkpoint_path(output_base, stage_name)
+        if not checkpoint_path.exists():
+            return False
+        try:
+            with open(checkpoint_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            ctx["artifacts"].update(data.get("artifacts", {}))
+            ctx["timestamps"][stage_name] = data.get("timestamp", {})
+            self.logger.info(
+                f"    ↩ '{stage_name}' restored from checkpoint "
+                f"(saved {data.get('saved_at', 'unknown')})"
+            )
+            return True
+        except Exception as e:
+            self.logger.warning(
+                f"Checkpoint for '{stage_name}' is corrupt or unreadable "
+                f"({e}). Re-running stage."
+            )
+            return False
+
+    def _clear_checkpoints(self, output_base: Path) -> None:
+        """Delete all stage checkpoints under output_base."""
+        for stage_name in STAGE_ORDER:
+            cp = self._checkpoint_path(output_base, stage_name)
+            if cp.exists():
+                cp.unlink()
+                self.logger.info(f"Cleared checkpoint: {cp}")
+
+    # ------------------------------------------------------------------
+    # Single-session run
+    # ------------------------------------------------------------------
+    def run(
+        self,
+        input_path: str,
+        session_id: str | None = None,
+        force: bool = False,
+        only_stages: set[str] | None = None,
+    ) -> dict:
+        """
+        Execute pipeline stages for a single simulation session.
+
+        Parameters
+        ----------
+        input_path : str
+            Path to session directory containing raw recordings.
+        session_id : str | None
+            Optional override; derived from directory name if None.
+        force : bool
+            If True, ignore checkpoints for the stages being run.
+            When combined with only_stages, only those stages are re-run;
+            all other stages still restore from their checkpoints.
+        only_stages : set[str] | None
+            If provided, only run stages whose names are in this set.
+            All other stages are skipped but their checkpoints are still
+            loaded so downstream stages receive the required artifacts.
+            If None, all stages run (default behaviour).
+
+        Returns
+        -------
+        dict
+            Final pipeline context with all intermediate and final outputs.
+        """
+        input_dir = Path(input_path)
+        if session_id is None:
+            session_id = input_dir.name
+
+        output_base = Path(self.config["paths"]["output_dir"]) / session_id
+        output_base.mkdir(parents=True, exist_ok=True)
+
+        if force and only_stages is None:
+            # Global force: clear every checkpoint
+            self.logger.info("--force: clearing all existing checkpoints.")
+            self._clear_checkpoints(output_base)
+
+        self.logger.info("=" * 70)
+        self.logger.info(f"PIPELINE START — session: {session_id}")
+        self.logger.info(f"Pipeline version: {PIPELINE_VERSION}")
+        active_digest = self.frozen_manifest["manifest_digest"] if self.frozen_manifest else self.manifest.digest()
+        self.logger.info(f"Freeze manifest hash: {active_digest}")
+        if only_stages is not None:
+            self.logger.info(f"Running only stages: {sorted(only_stages)}")
+        self.logger.info("=" * 70)
+
+        ctx: dict = {
+            "session_id": session_id,
+            "input_path": str(input_dir),
+            "output_base": str(output_base),
+            "config": self.config,
+            "manifest": self.frozen_manifest if self.frozen_manifest else self.manifest.to_dict(),
+            "timestamps": {},
+            "artifacts": {},
+        }
+
+        for stage_name in STAGE_ORDER:
+            stage = self.stages[stage_name]
+            stage_is_selected = only_stages is None or stage_name in only_stages
+
+            if stage_is_selected and force:
+                # Clear only the checkpoints of stages we are actually re-running
+                cp = self._checkpoint_path(output_base, stage_name)
+                if cp.exists():
+                    cp.unlink()
+                    self.logger.info(f"Cleared checkpoint for '{stage_name}' (--force)")
+
+            # Always attempt checkpoint restore — even for skipped stages this
+            # populates ctx with their artifacts so downstream stages work.
+            if self._load_checkpoint(output_base, stage_name, ctx):
+                if not stage_is_selected:
+                    self.logger.debug(f"    ↩ '{stage_name}' restored from checkpoint (skipped)")
+                continue
+
+            if not stage_is_selected:
+                self.logger.info(f"--- Stage: {stage_name} [skipped — not in --stages] ---")
+                continue
+
+            self.logger.info(f"--- Stage: {stage_name} ---")
+
+            t0 = time.perf_counter()
+            try:
+                ctx = stage.run(ctx)
+            except Exception:
+                self.logger.exception(f"Stage '{stage_name}' failed.")
+                ctx["timestamps"][stage_name] = {"status": "FAILED"}
+                cp = self._checkpoint_path(output_base, stage_name)
+                if cp.exists():
+                    cp.unlink()
+                raise
+
+            elapsed = time.perf_counter() - t0
+            ctx["timestamps"][stage_name] = {
+                "status": "OK",
+                "elapsed_s": round(elapsed, 2),
+            }
+
+            self._save_checkpoint(output_base, stage_name, ctx)
+            self.logger.info(f"    ✓ {stage_name} completed in {elapsed:.2f}s")
+
+            # ── Release stage resources from RAM/VRAM ──────────────────
+            if hasattr(stage, "cleanup"):
+                stage.cleanup()
+                self.logger.info(f"    ♻ {stage_name} resources released")
+
+            # ── Slim ctx: replace large in-memory artifacts with paths ──
+            for key in _ARTIFACT_KEYS_TO_SLIM.get(stage_name, []):
+                if key in ctx["artifacts"] and not isinstance(ctx["artifacts"][key], str):
+                    ctx["artifacts"][key] = ctx["artifacts"].get(f"{key}_path", f"[slimmed after {stage_name}]")
+                    self.logger.debug(f"    ↓ ctx['artifacts']['{key}'] slimmed to path reference")
+        
+        # Save pipeline run metadata
+        meta_path = output_base / "pipeline_meta.json"
+        with open(meta_path, "w", encoding="utf-8") as f:
+            json.dump(
+                {
+                    "session_id": session_id,
+                    "pipeline_version": PIPELINE_VERSION,
+                    "manifest_hash": self.frozen_manifest["manifest_digest"] if self.frozen_manifest else self.manifest.digest(),
+                    "timestamps": sanitize_for_json(ctx["timestamps"]),
+                    "completed_at": datetime.now(timezone.utc).isoformat(),
+                },
+                f,
+                indent=2,
+                cls=JSONEncoder,
+            )
+
+        self.logger.info("=" * 70)
+        self.logger.info(f"PIPELINE COMPLETE — session: {session_id}")
+        self.logger.info(
+            f"Report: {ctx['artifacts'].get('report_path', 'N/A')}"
+        )
+        self.logger.info("=" * 70)
+
+        return ctx
+
+    # ------------------------------------------------------------------
+    # Batch run
+    # ------------------------------------------------------------------
+    def run_batch(
+        self,
+        input_dir: str,
+        force: bool = False,
+        only_stages: set[str] | None = None,
+    ) -> list[dict]:
+        """
+        Run pipeline on all session subdirectories.
+
+        Parameters
+        ----------
+        input_dir : str
+            Parent directory containing one subdirectory per session.
+        force : bool
+            If True, ignore existing checkpoints for the stages being run.
+        only_stages : set[str] | None
+            If provided, only run stages whose names are in this set.
+        """
+        root = Path(input_dir)
+        sessions = sorted([d for d in root.iterdir() if d.is_dir()])
+        self.logger.info(f"Batch mode: {len(sessions)} sessions found in {root}")
+
+        results = []
+        failed = []
+        for session_dir in sessions:
+            self.logger.info(f"\nProcessing session: {session_dir.name}")
+            try:
+                result = self.run(str(session_dir), force=force, only_stages=only_stages)
+                results.append(result)
+            except Exception as exc:
+                self.logger.error(
+                    f"Session '{session_dir.name}' failed: {exc}. Continuing."
+                )
+                failed.append(session_dir.name)
+                results.append({
+                    "session_id": session_dir.name,
+                    "status": "FAILED",
+                    "error": str(exc),
+                })
+
+        self.logger.info(
+            f"\nBatch complete: {len(sessions) - len(failed)} succeeded, "
+            f"{len(failed)} failed."
+        )
+        if failed:
+            self.logger.warning(f"Failed sessions: {failed}")
+
+        return results
+
+
+# ======================================================================
+# CLI
+# ======================================================================
+def main():
+    parser = argparse.ArgumentParser(
+        description="Paediatric Simulation AI Feedback Pipeline"
+    )
+    parser.add_argument(
+        "--config",
+        default="config/pipeline_config.yaml",
+        help="Path to pipeline config YAML",
+    )
+    parser.add_argument(
+        "--input",
+        required=False,
+        help="Path to session directory (or parent dir in batch mode)",
+    )
+    parser.add_argument(
+        "--batch",
+        action="store_true",
+        help="Process all subdirectories in --input as separate sessions",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "Ignore existing stage checkpoints and re-run all stages. "
+            "Use this after code or config changes to ensure a clean run."
+        ),
+    )
+    parser.add_argument(
+        "--stages",
+        nargs="+",
+        choices=list(STAGE_ORDER),
+        metavar="STAGE",
+        help=(
+            f"Run only the specified stage(s). "
+            f"All other stages are skipped but their checkpoints are loaded "
+            f"so dependent stages receive the required artifacts. "
+            f"Valid stages: {', '.join(STAGE_ORDER)}. "
+            f"Example: --stages video_analysis report"
+        ),
+    )
+    parser.add_argument(
+        "--freeze-manifest",
+        action="store_true",
+        help="Print the freeze manifest for the current config and exit",
+    )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+    )
+    args = parser.parse_args()
+
+    setup_logging(args.log_level)
+
+    # --freeze-manifest is a read-only introspection tool — construct the
+    # pipeline and print the manifest before any stage initialisation that
+    # might fail due to missing model files.
+    #
+    # Refuses to print when the git working tree is dirty, to prevent the
+    # manifest from recording a git_commit that doesn't match what's on disk.
+    # Override by setting ALLOW_DIRTY_FREEZE=1 in the environment (for local
+    # iteration or when freezing outside a git repo).
+    if args.freeze_manifest:
+        config = Pipeline._load_config(args.config)
+        manifest = FreezeManifest(
+            pipeline_version=PIPELINE_VERSION,
+            config=config,
+        )
+        manifest_dict = manifest.to_dict()
+        clean = manifest_dict.get("working_tree_clean_at_freeze")
+        if clean is False and os.environ.get("ALLOW_DIRTY_FREEZE") != "1":
+            print(
+                "⚠ REFUSING TO FREEZE: git working tree has uncommitted "
+                "changes. Commit or stash first, or set "
+                "ALLOW_DIRTY_FREEZE=1 to override.",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+        print(json.dumps(manifest_dict, indent=2, ensure_ascii=False))
+        sys.exit(0)
+
+    if not args.input:
+        parser.error("--input is required unless using --freeze-manifest")
+
+    pipe = Pipeline(args.config)
+
+    only_stages = set(args.stages) if args.stages else None
+
+    if args.batch:
+        pipe.run_batch(args.input, force=args.force, only_stages=only_stages)
+    else:
+        pipe.run(args.input, force=args.force, only_stages=only_stages)
+
+
+if __name__ == "__main__":
+    main()
