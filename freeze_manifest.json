@@ -1,0 +1,103 @@
+{
+  "pipeline_version": "1.0.0",
+  "git_commit": "d586ea464dcb8e4b2ef5f9260b9a009534aca56f",
+  "working_tree_clean_at_freeze": true,
+  "frozen_at": "2026-04-14T16:26:11.247820+00:00",
+  "seeds": {
+    "global": 42,
+    "llm": 42
+  },
+  "models": {
+    "asr": {
+      "engine": "faster-whisper",
+      "model_name": "large-v3",
+      "compute_type": "float16",
+      "beam_size": 7,
+      "language": "de"
+    },
+    "diarization": {
+      "enabled": true
+    },
+    "llm": {
+      "backend": "llama_cpp",
+      "model_id": "qwen2.5-32b-instruct-q8_0-00001-of-00009",
+      "temperature": 0.0,
+      "context_length": 32768
+    }
+  },
+  "prompt_template_hashes": {
+    "files": {
+      "templates/instruments/diabetes_cc_complications.j2": "5b8f2ae29e0ceb0461fa8845125512740ad51b3a080de9d9d1347bc7f7b8ffea",
+      "templates/instruments/diabetes_cc_diagnostik.j2": "e770cdeccec077257d3ed4a8cfb1088791d130ac692587932387bfedc985e8a5",
+      "templates/instruments/diabetes_cc_pathophysio.j2": "6340c532b3cecdec51cc583b450f236bfca855951203d5b85e1aa972f41ea935",
+      "templates/instruments/diabetes_cc_schuldfrage.j2": "9dc35e779c8c9151d062e321a6fd867979647bcf09043251ec74e7f070fb5f3f",
+      "templates/instruments/diabetes_cc_therapie.j2": "6c220dfcb97cb4e164350215510f1d31314a6170957b57d9b57c76626af0da0d",
+      "templates/instruments/gslp_begruendung.j2": "8afd3197c03469ac594f4046bbd0ac89d2e7d3c62956db508aa80a819ff3345f",
+      "templates/instruments/gslp_beschreibung.j2": "a02036b68d040dfcdb72b447ff5b82e4aca6bc86d74858784ca8fdb0c849e601",
+      "templates/instruments/gslp_sequence.j2": "d1894f35eeadc230a362653a2fa778c7026a182ca958ba612ce3f760308936d5",
+      "templates/instruments/lp_aufklaerung_begruendung.j2": "a965c7e9d64ecdfc41ab7645d8be55be29e75b806ad9a856cd3a9c5c77278c2a",
+      "templates/instruments/lp_aufklaerung_beschreibung.j2": "859b5ff62c8bc95df8e42a3342cab5ab18a5807abcd088f67785fc04de97e9ac",
+      "templates/instruments/lp_aufklaerung_risiken.j2": "ccb862859405cee309fc9ade8b6c116b5a23f1cb94122fdd7ac719ff85020129",
+      "templates/instruments/lucas_pass1.j2": "f7f5fa3e5efe9a153addad1e7b8f8db00af1fc44f2816f7bfc3b7311bdfd44f9",
+      "templates/instruments/lucas_pass2.j2": "1a9c6beea443f0bc0eb455e4d7bc3696400d6160d3a51e5ec27a773a3112847d",
+      "templates/instruments/lucas_pass3.j2": "459db214377a1db1505517f2f13a8475cb1d3f35ac35bb8c9c98a439695212f3",
+      "templates/instruments/lucas_pass4.j2": "bb8c6bd50dfab0d833a1f1354042cc87a4562bad8967e27c5707a38268ea508c",
+      "templates/instruments/lucas_pass5.j2": "df856d0e679fc4ee9f779c633ffb2136234e084c468bb9698f48562def54ec47",
+      "templates/instruments/lucas_pass6.j2": "d263146da21c6a314e4c39ad5c563cc062483566ae0814b3da8c6bd606a4068f",
+      "templates/instruments/lucas_pass7.j2": "c35b1f8cd38899cc5b7236e00aaed832659eed451d4df1c586a050c16adffb0f",
+      "templates/instruments/spikes_pass1.j2": "e401d97c84209e0be972104e2a15f8e6615def83b6d3dad4404a23475f2cf4cc",
+      "templates/instruments/spikes_pass2.j2": "ce3b61d4212333958c1b964c9b05909b2b4ead6449e175503dc2a6e1f69eed73",
+      "templates/instruments/spikes_pass3.j2": "862fbb62d3bda57047e9d2b37eeb6fe3f42e17dc7e0d4283e3726ae0ccc54651",
+      "templates/instruments/spikes_pass4.j2": "f0060b781e4561a25ccaf72f505182969e9696304c82f3f6aeec26b898c9c151",
+      "templates/instruments/spikes_pass5.j2": "87824ed4f4b9738d24fd2b85c9b6c044598989a4462e3c1cc7a2e7ead15e5d70",
+      "templates/instruments/spikes_pass6.j2": "427d2647031e8a6b00b7a5d9d5dfc97ef38e9bfe335ebd0b479bb218892f0c16",
+      "templates/instruments/spikes_pass7.j2": "c80566234e91a462e11e418fca105c039f019366cf8bc51c645e310b547480e6",
+      "instruments/Diabetes_CC.json": "91cac28695fdc58c9d40c1c1cf6c9e53c72a426698195548ee15853a6d5e93d3",
+      "instruments/GSLP.json": "581a34703134232b6fef5a790318676f8f6d002b2ea401dfa8c858e828d5e175",
+      "instruments/LP_Aufklaerung.json": "99b6979e4ca55bb06f76cc929d72a2987e1b4b03d026cc43b1c9728c1e3c7644",
+      "instruments/LUCAS.json": "49b6407bf646299527fa6df047ecda883254db493cc19770e4a9bfddeb1889c0",
+      "instruments/SPIKES.json": "ce69a165ee249575a9fda9b7ec8619c1228864e53cdc215f4a2b5df4aa36d7ef"
+    },
+    "combined": "255d1c7ffdcab085bf87a4337f4679e3f2727965d03ed6e736a22e26f7e8ea09"
+  },
+  "source_code_hashes": {
+    "files": {
+      "pipeline.py": "950d8e1177e5b867c196955e81c5ca4acf4b6542ae5cca354b591c2fe3142aa6",
+      "stages/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stages/base.py": "2397cb6aec6fa1ce0548a9eee1d68760cc56681748d82c574b42969d176a3c47",
+      "stages/s1_ingest.py": "48bbaeecf270487c85d99b3a13dfa387ec88e025c20c6ba5afb4a045593f45f7",
+      "stages/s2_asr.py": "f12617cbec7329eedee54a8328c153c801c659377093fd3ea8280c68eab27516",
+      "stages/s3_features.py": "f563d6f4471f5d6e15d9ca1790b702b5932b5dee93c252993abcd1dd396f6d9c",
+      "stages/s4_video_analysis.py": "64b9f57e4dda4bba23941089d7ad42e42a704df48d42ce499bd92caaed2241c3",
+      "stages/s5_analysis.py": "bcf638485dabf5ca479ae020cdcd356519097ad2c035af6e64bb9bd7da6a7e95",
+      "stages/s6_translate.py": "d53ea43dd2f317dbdf9894713068b43170b5bfe41df6f7f6b3b1a8f4e0099f98",
+      "stages/s7_report.py": "b79933d9f01c8ca380e76763f76fb1cbc6f8120624317139e45be16ca06a0456",
+      "utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "utils/artifact_io.py": "b5d1782e3696934e604d8bcb01d1467c9326fbf22c0d89cecb8c3765aea84c1d",
+      "utils/freeze.py": "bebd6c29da3742ebc1204aab86db1228c33f58eba8c08d86b308f74ff7b30d6f",
+      "utils/json_utils.py": "b52838e7c302802ecc3c3ee9f13afcd926c5ee19de4a137779d59fa0db54e90d",
+      "utils/llm_backends.py": "706150c8aef64dd4ea46dd76c82114fea06a3feb6e1b511533edb21afe276134",
+      "utils/logging_setup.py": "e0a8084474800e9b0672d7fc882bfd04f7ae6f8f83941b128fa3a0465a184a75",
+      "utils/scenario_map.py": "73af314272684d0d71eb510b0d3c2890210708eb7e35fb7d280e30d0ea51a4de",
+      "utils/scorers/__init__.py": "1390dcbf33435c5cd74be917f5abfd149eb81cfc6f8a40a8f11e8e4328fc6b3c",
+      "utils/scorers/instrument_scorer.py": "2d9399a1e6607297e33abcbb23bdec2b40aa34a3806d518ae0ef3e1f8e9f30c0"
+    },
+    "combined": "309741a4a7910a42696e473dbd7393f5e954fec7fbf0c4688c32aabd90c366d4"
+  },
+  "config_hash": "333bb3bbdfbcbdf5aceb4a855db3512a985e9baf056f05c066a0ea626ed437a3",
+  "environment": {
+    "python_version": "3.11.14",
+    "platform": "Linux-6.8.0-107-generic-x86_64-with-glibc2.39",
+    "machine": "x86_64",
+    "processor": "x86_64",
+    "pkg_llama_cpp_python": "0.3.16",
+    "pkg_faster_whisper": "1.2.1",
+    "pkg_ctranslate2": "4.7.1",
+    "pkg_nemo_toolkit": null,
+    "pkg_torch": "2.5.1+cu124",
+    "pkg_numpy": "2.4.2",
+    "pkg_transformers": "5.2.0",
+    "pkg_jinja2": "3.1.6"
+  },
+  "manifest_digest": "687f6ce35f082c67"
+}
